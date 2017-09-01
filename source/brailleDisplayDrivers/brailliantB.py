@@ -8,11 +8,11 @@ import os
 import _winreg
 import itertools
 import serial
-import hwPortUtils
 import braille
 import inputCore
 from logHandler import log
 import brailleInput
+import bdDetect
 import hwIo
 
 TIMEOUT = 0.2
@@ -62,40 +62,6 @@ DOT1_KEY = 2
 DOT8_KEY = 9
 SPACE_KEY = 10
 
-def _getPorts():
-	# USB HID.
-	for portInfo in hwPortUtils.listHidDevices():
-		if portInfo.get("usbID") == "VID_1C71&PID_C006":
-			yield "USB HID", portInfo["devicePath"]
-
-	# USB serial.
-	try:
-		rootKey = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Enum\USB\Vid_1c71&Pid_c005")
-	except WindowsError:
-		# A display has never been connected via USB.
-		pass
-	else:
-		with rootKey:
-			for index in itertools.count():
-				try:
-					keyName = _winreg.EnumKey(rootKey, index)
-				except WindowsError:
-					break
-				try:
-					with _winreg.OpenKey(rootKey, os.path.join(keyName, "Device Parameters")) as paramsKey:
-						yield "USB serial", _winreg.QueryValueEx(paramsKey, "PortName")[0]
-				except WindowsError:
-					continue
-
-	# Bluetooth.
-	for portInfo in hwPortUtils.listComPorts(onlyAvailable=True):
-		try:
-			btName = portInfo["bluetoothName"]
-		except KeyError:
-			continue
-		if btName.startswith("Brailliant B") or btName == "Brailliant 80":
-			yield "bluetooth", portInfo["port"]
-
 class BrailleDisplayDriver(braille.BrailleDisplayDriver):
 	name = "brailliantB"
 	# Translators: The name of a series of braille displays.
@@ -104,19 +70,36 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver):
 
 	@classmethod
 	def check(cls):
-		try:
-			next(_getPorts())
-		except StopIteration:
-			# No possible ports found.
-			return False
-		return True
+		return bdDetect.arePossibleDevicesForDriver(cls.name)
 
-	def __init__(self):
+	@classmethod
+	def _getTryPorts(self, port):
+		for name, desc in braille.BrailleDisplayDriver._getTryPorts(port):
+			if not desc==bdDetect.KEY_USBCUSTOM:
+				yield name, desc
+			else:
+				try:
+					rootKey = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Enum\USB\{usbId}".format(usbId=name[4:21]))
+				except WindowsError:
+					continue
+				with rootKey:
+					for index in itertools.count():
+						try:
+							keyName = _winreg.EnumKey(rootKey, index)
+						except WindowsError:
+							break
+						try:
+							with _winreg.OpenKey(rootKey, os.path.join(keyName, "Device Parameters")) as paramsKey:
+								yield _winreg.QueryValueEx(paramsKey, "PortName")[0], bdDetect.KEY_USBSER
+						except WindowsError:
+							continue
+
+	def __init__(self, port=None):
 		super(BrailleDisplayDriver, self).__init__()
 		self.numCells = 0
 
-		for portType, port in _getPorts():
-			self.isHid = portType == "USB HID"
+		for portType, portId, port, portAlternateId in self._getTryPorts(port):
+			self.isHid = portType == bdDetect.KEY_USBHID
 			# Try talking to the display.
 			try:
 				if self.isHid:

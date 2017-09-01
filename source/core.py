@@ -29,11 +29,18 @@ import logHandler
 import globalVars
 from logHandler import log
 import addonHandler
+import extensionPoints
 
 PUMP_MAX_DELAY = 10
 
 #: The thread identifier of the main thread.
 mainThreadId = thread.get_ident()
+
+#: Notifies when hardware is changed on the system.
+#: This allows components to perform an action when hardware changes occur.
+#: For example, the braille display auto detection mechanism makes use of this.
+#: Handlers are called with no arguments.
+hardwareChanged = extensionPoints.Action()
 
 _pump = None
 _isPumpPending = False
@@ -274,6 +281,9 @@ This initializes all modules such as audio, IAccessible, keyboard, mouse, and GU
 		ORIENTATION_NOT_INITIALIZED = 0
 		ORIENTATION_PORTRAIT = 1
 		ORIENTATION_LANDSCAPE = 2
+		# Constants for device changes
+		WM_DEVICECHANGE = 0x0219
+		DBT_DEVNODES_CHANGED = 0x0007
 
 		def __init__(self, windowName=None):
 			super(MessageWindow, self).__init__(windowName)
@@ -287,6 +297,8 @@ This initializes all modules such as audio, IAccessible, keyboard, mouse, and GU
 				self.handlePowerStatusChange()
 			elif msg == self.WM_DISPLAYCHANGE:
 				self.handleScreenOrientationChange(lParam)
+			elif msg == self.WM_DEVICECHANGE and wParam == self.DBT_DEVNODES_CHANGED:
+				hardwareChanged.notify()
 
 		def handleScreenOrientationChange(self, lParam):
 			import ui

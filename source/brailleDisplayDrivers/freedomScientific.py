@@ -8,13 +8,13 @@ from ctypes import *
 from ctypes.wintypes import *
 from collections import OrderedDict
 import itertools
-import hwPortUtils
 import braille
 import inputCore
 from baseObject import ScriptableObject
 from winUser import WNDCLASSEXW, WNDPROC, LRESULT, HCURSOR
 from logHandler import log
 import brailleInput
+import bdDetect
 
 #Try to load the fs braille dll
 try:
@@ -47,13 +47,6 @@ nvdaFsBrlWm=windll.user32.RegisterWindowMessageW(u"nvdaFsBrlWm")
 inputType_keys=3
 inputType_routing=4
 inputType_wizWheel=5
-
-# Names of freedom scientific bluetooth devices
-bluetoothNames = (
-	"F14", "Focus 14 BT",
-	"Focus 40 BT",
-	"Focus 80 BT",
-)
 
 keysPressed=0
 extendedKeysPressed=0
@@ -120,28 +113,7 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver,ScriptableObject):
 
 	@classmethod
 	def check(cls):
-		return bool(fsbLib)
-
-	@classmethod
-	def getPossiblePorts(cls):
-		ports = OrderedDict([cls.AUTOMATIC_PORT, ("USB", "USB",)])
-		try:
-			cls._getBluetoothPorts().next()
-			ports["bluetooth"] = "Bluetooth"
-		except StopIteration:
-			pass
-		return ports
-
-	@classmethod
-	def _getBluetoothPorts(cls):
-		for p in hwPortUtils.listComPorts():
-			try:
-				btName = p["bluetoothName"]
-			except KeyError:
-				continue
-			if not any(btName == prefix or btName.startswith(prefix + " ") for prefix in bluetoothNames):
-				continue
-			yield p["port"].encode("mbcs")
+		return bool(fsbLib) and bdDetect.arePossibleDevicesForDriver(cls.name)
 
 	wizWheelActions=[
 		# Translators: The name of a key on a braille display, that scrolls the display to show previous/next part of a long line.
@@ -162,17 +134,12 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver,ScriptableObject):
 		super(BrailleDisplayDriver,self).__init__()
 		self._messageWindowClassAtom=windll.user32.RegisterClassExW(byref(nvdaFsBrlWndCls))
 		self._messageWindow=windll.user32.CreateWindowExW(0,self._messageWindowClassAtom,u"nvdaFsBrlWndCls window",0,0,0,0,0,None,None,appInstance,None)
-		if port == "auto":
-			portsToTry = itertools.chain(["USB"], self._getBluetoothPorts())
-		elif port == "bluetooth":
-			portsToTry = self._getBluetoothPorts()
+		if isinstance(port, bdDetect.DeviceMatch) and port.type==bdDetect.KEY_COMBT:
+			port = port.port
 		else: # USB
-			portsToTry = ["USB"]
+			port = "USB"
 		fbHandle=-1
-		for port in portsToTry:
-			fbHandle=fbOpen(port,self._messageWindow,nvdaFsBrlWm)
-			if fbHandle!=-1:
-				break
+		fbHandle=fbOpen(port,self._messageWindow,nvdaFsBrlWm)
 		if fbHandle==-1:
 			windll.user32.DestroyWindow(self._messageWindow)
 			windll.user32.UnregisterClassW(self._messageWindowClassAtom,appInstance)

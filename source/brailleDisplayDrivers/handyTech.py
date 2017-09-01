@@ -18,52 +18,19 @@ import ui
 from baseObject import ScriptableObject, AutoPropertyObject
 from globalCommands import SCRCAT_BRAILLE
 from logHandler import log
-
+import bdDetect
 
 TIMEOUT = 0.2
 BAUD_RATE = 19200
 PARITY = serial.PARITY_ODD
 
 # pylint: disable=C0330
-USB_IDS_SER = {
-	"VID_0403&PID_6001", # FTDI chip
-	"VID_0921&PID_1200", # GoHubs chip
-}
-
-# Newer displays have a native HID processor
-# pylint: disable=C0330
-USB_IDS_HID_NATIVE = {
-	"VID_1FE4&PID_0054", # Active Braille
-	"VID_1FE4&PID_0081", # Basic Braille 16
-	"VID_1FE4&PID_0082", # Basic Braille 20
-	"VID_1FE4&PID_0083", # Basic Braille 32
-	"VID_1FE4&PID_0084", # Basic Braille 40
-	"VID_1FE4&PID_008A", # Basic Braille 48
-	"VID_1FE4&PID_0086", # Basic Braille 64
-	"VID_1FE4&PID_0087", # Basic Braille 80
-	"VID_1FE4&PID_008B", # Basic Braille 160
-	"VID_1FE4&PID_0061", # Actilino
-	"VID_1FE4&PID_0064", # Active Star 40
-}
-
-# Some older displays use a HID converter and an internal serial interface
+# Some older Handy Tech displays use a HID converter and an internal serial interface.
+# We need to keep these IDS around here to send additional data upon connection.
 USB_IDS_HID_CONVERTER = {
 	"VID_1FE4&PID_0003", # USB-HID adapter
 	"VID_1FE4&PID_0074", # Braille Star 40
 	"VID_1FE4&PID_0044", # Easy Braille
-}
-
-USB_IDS_HID = USB_IDS_HID_NATIVE | USB_IDS_HID_CONVERTER
-
-# pylint: disable=C0330
-BLUETOOTH_NAMES = {
-	"Actilino AL",
-	"Active Braille AB",
-	"Active Star AS",
-	"Basic Braille BB",
-	"Braille Star BS",
-	"Braille Wave BW",
-	"Easy Braille EBR",
 }
 
 # Model identifiers
@@ -488,53 +455,12 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver, ScriptableObject):
 
 	@classmethod
 	def check(cls):
-		return True
+		return (bdDetect.arePossibleDevicesForDriver(cls.name)
+			or next(cls.getManualPorts(), None) is not None)
 
 	@classmethod
-	def getPossiblePorts(cls):
-		ports = OrderedDict()
-		comPorts = list(hwPortUtils.listComPorts(onlyAvailable=True))
-		try:
-			next(cls._getAutoPorts(comPorts))
-			ports.update((cls.AUTOMATIC_PORT,))
-		except StopIteration:
-			pass
-		for portInfo in comPorts:
-			# Translators: Name of a serial communications port.
-			ports[portInfo["port"]] = _("Serial: {portName}").format(
-				portName=portInfo["friendlyName"])
-		return ports
-
-	@classmethod
-	def _getAutoPorts(cls, comPorts):
-		for portInfo in hwPortUtils.listHidDevices():
-			if portInfo.get("usbID") in USB_IDS_HID_CONVERTER:
-				yield portInfo["devicePath"], "USB HID serial converter"
-			if portInfo.get("usbID") in USB_IDS_HID_NATIVE:
-				yield portInfo["devicePath"], "USB HID"
-		# Try bluetooth ports last.
-		for portInfo in sorted(comPorts, key=lambda item: "bluetoothName" in item):
-			port = portInfo["port"]
-			hwId = portInfo["hardwareID"]
-			if hwId.startswith(r"FTDIBUS\COMPORT"):
-				# USB.
-				# TODO: It seems there is also another chip (Gohubs) used in some models. See if we can autodetect that as well.
-				portType = "USB serial"
-				try:
-					usbId = hwId.split("&", 1)[1]
-				except IndexError:
-					continue
-				if usbId not in USB_IDS_SER:
-					continue
-			elif "bluetoothName" in portInfo:
-				# Bluetooth.
-				portType = "bluetooth"
-				btName = portInfo["bluetoothName"]
-				if not any(btName.startswith(prefix) for prefix in BLUETOOTH_NAMES):
-					continue
-			else:
-				continue
-			yield port, portType
+	def getManualPorts(cls):
+		return braille.getSerialPorts()
 
 	def __init__(self, port="auto"):
 		super(BrailleDisplayDriver, self).__init__()
@@ -547,15 +473,11 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver, ScriptableObject):
 		self._awaitingACK = False
 		self._hidSerialBuffer = ""
 
-		if port == "auto":
-			tryPorts = self._getAutoPorts(hwPortUtils.listComPorts(onlyAvailable=True))
-		else:
-			tryPorts = ((port, "serial"),)
-		for port, portType in tryPorts:
+		for portType, portId, port, portAlternateId in self._getTryPorts(port):
 			# At this point, a port bound to this display has been found.
 			# Try talking to the display.
-			self.isHid = portType.startswith("USB HID")
-			self.isHidSerial = portType == "USB HID serial converter"
+			self.isHid = portType == bdDetect.KEY_USBHID
+			self.isHidSerial = portId in USB_IDS_HID_CONVERTER
 			try:
 				if self.isHid:
 					self._dev = hwIo.Hid(port, onReceive=self._onReceive)

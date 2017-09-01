@@ -93,6 +93,16 @@ SetupDiGetDeviceRegistryProperty = ctypes.windll.setupapi.SetupDiGetDeviceRegist
 SetupDiGetDeviceRegistryProperty.argtypes = (HDEVINFO, PSP_DEVINFO_DATA, DWORD, PDWORD, ctypes.c_void_p, DWORD, PDWORD)
 SetupDiGetDeviceRegistryProperty.restype = BOOL
 
+SetupDiEnumDeviceInfo = ctypes.windll.setupapi.SetupDiEnumDeviceInfo
+SetupDiEnumDeviceInfo.argtypes = (HDEVINFO, DWORD, PSP_DEVINFO_DATA)
+SetupDiEnumDeviceInfo.restype = BOOL
+
+CM_Get_Device_ID = ctypes.windll.cfgmgr32.CM_Get_Device_IDW
+CM_Get_Device_ID.argtypes = (DWORD, ctypes.c_wchar_p, ULONG, ULONG)
+CM_Get_Device_ID.restype = DWORD
+CR_SUCCESS = 0
+MAX_DEVICE_ID_LEN = 200
+
 GUID_CLASS_COMPORT = GUID(0x86e0d1e0L, 0x8089, 0x11d0,
 	(ctypes.c_ubyte*8)(0x9c, 0xe4, 0x08, 0x00, 0x3e, 0x30, 0x1f, 0x73))
 GUID_DEVINTERFACE_USB_DEVICE = GUID(0xA5DCBF10, 0x6530, 0x11D2,
@@ -220,6 +230,11 @@ def listComPorts(onlyAvailable=True):
 						entry["bluetoothAddress"], entry["bluetoothName"] = getWidcommBluetoothPortInfo(port)
 					except:
 						pass
+				else:
+					usbIdStart = hwID.find("VID_")
+					if usbIdStart==-1:
+						continue
+					usbId = entry['usbID'] = hwID[usbIdStart:usbIdStart+17] # VID_xxxx&PID_xxxx
 			finally:
 				ctypes.windll.advapi32.RegCloseKey(regKey)
 
@@ -392,9 +407,13 @@ def listUsbDevices(onlyAvailable=True):
 			else:
 				# The string is of the form "usb\VID_xxxx&PID_xxxx&..."
 				usbId = buf.value[4:21] # VID_xxxx&PID_xxxx
+				info = {
+					"hardwareID": buf.value,
+					"usbID": usbId,
+					"devicePath": idd.DevicePath}
 				if _isDebug():
 					log.debug("%r" % usbId)
-				yield usbId
+				yield info
 	finally:
 		SetupDiDestroyDeviceInfoList(g_hdi)
 	if _isDebug():

@@ -1545,13 +1545,29 @@ class BrailleSettingsDialog(SettingsDialog):
 
 		# Translators: The label for a setting in braille settings to choose a braille display.
 		displayLabelText = _("Braille &display:")
-		driverList = braille.getDisplayList()
+		curDispName = braille.handler.display.name
+		detectionEnabled = config.conf["braille"]["display"] == braille.AUTO_DISPLAY_NAME
+		driverList = []
+		if not detectionEnabled or curDispName == "noBraille":
+			# Translators: An option in the braille display list in the Braille Settings dialog
+			# to automatically detect and use a braille display.
+			driverList.append((braille.AUTO_DISPLAY_NAME, _("Automatic")))
+		else:
+			# Translators: An option in the braille display list in the Braille Settings dialog
+			# to automatically detect and use a braille display.
+			# %s will be replace dwith the name of the display that is currently being used.
+			driverList.append((braille.AUTO_DISPLAY_NAME,
+				_("Automatic (%s)") % braille.handler.display.description))
+		driverList.extend(braille.getDisplayList())
 		self.displayNames = [driver[0] for driver in driverList]
 		displayChoices = [driver[1] for driver in driverList]
 		self.displayList = sHelper.addLabeledControl(displayLabelText, wx.Choice, choices=displayChoices)
 		self.Bind(wx.EVT_CHOICE, self.onDisplayNameChanged, self.displayList)
 		try:
-			selection = self.displayNames.index(braille.handler.display.name)
+			if detectionEnabled:
+				selection = 0
+			else:
+				selection = self.displayNames.index(curDispName)
 			self.displayList.SetSelection(selection)
 		except:
 			pass
@@ -1720,12 +1736,13 @@ class BrailleSettingsDialog(SettingsDialog):
 
 	def updatePossiblePorts(self):
 		displayName = self.displayNames[self.displayList.GetSelection()]
-		displayCls = braille._getDisplayDriver(displayName)
 		self.possiblePorts = []
-		try:
-			self.possiblePorts.extend(displayCls.getPossiblePorts().iteritems())
-		except NotImplementedError:
-			pass
+		if displayName != "auto":
+			displayCls = braille._getDisplayDriver(displayName)
+			try:
+				self.possiblePorts.extend(displayCls.getPossiblePorts().iteritems())
+			except NotImplementedError:
+				pass
 		if self.possiblePorts:
 			self.portsList.SetItems([p[1] for p in self.possiblePorts])
 			try:
