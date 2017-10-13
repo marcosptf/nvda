@@ -92,7 +92,7 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver):
 	def __init__(self, port="auto"):
 		super(BrailleDisplayDriver, self).__init__()
 		self._serial = None
-		for portType, portId, port, portAlternateId in self._getTryPorts(port):
+		for portType, portId, port, portInfo in self._getTryPorts(port):
 			log.debug("Checking port %s for a BrailleNote", port)
 			try:
 				self._serial = hwIo.Serial(port, baudrate=BAUD_RATE, timeout=TIMEOUT, writeTimeout=TIMEOUT, parity=serial.PARITY_NONE, onReceive=self._onReceive)

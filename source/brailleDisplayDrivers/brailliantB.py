@@ -98,7 +98,7 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver):
 		super(BrailleDisplayDriver, self).__init__()
 		self.numCells = 0
 
-		for portType, portId, port, portAlternateId in self._getTryPorts(port):
+		for portType, portId, port, portInfo in self._getTryPorts(port):
 			self.isHid = portType == bdDetect.KEY_USBHID
 			# Try talking to the display.
 			try:

@@ -2040,7 +2040,7 @@ class BrailleDisplayDriver(baseObject.AutoPropertyObject):
 		except (LookupError, StopIteration):
 			usb = False
 		try:
-			next(bdDetect.getPossibleBluetoothComPortsForDriver(cls.name))
+			next(bdDetect.getPossibleBluetoothDevicesForDriver(cls.name))
 			bluetooth = True
 		except (LookupError, StopIteration):
 			bluetooth = False
@@ -2072,7 +2072,7 @@ class BrailleDisplayDriver(baseObject.AutoPropertyObject):
 		if usb:
 			iters.append(bdDetect.getConnectedUsbDevicesForDriver(cls.name))
 		if bluetooth:
-			iters.append(bdDetect.getPossibleBluetoothComPortsForDriver(cls.name))
+			iters.append(bdDetect.getPossibleBluetoothDevicesForDriver(cls.name))
 
 		try:
 			for match in itertools.chain(*iters):
@@ -2112,9 +2112,9 @@ class BrailleDisplayDriver(baseObject.AutoPropertyObject):
 					pass
 				else:
 					if "bluetoothName" in portInfo:
-						yield bdDetect.DeviceMatch(bdDetect.KEY_COMBT, portInfo["bluetoothName"], portInfo["port"], portInfo["bluetoothAddress"])
+						yield bdDetect.DeviceMatch(bdDetect.KEY_SERIAL, portInfo["bluetoothName"], portInfo["port"], portInfo)
 					else:
-						yield bdDetect.DeviceMatch(bdDetect.KEY_COMU, portInfo["friendlyname"], portInfo["port"], portInfo["hardwareID"])
+						yield bdDetect.DeviceMatch(bdDetect.KEY_SERIAL, portInfo["friendlyname"], portInfo["port"], portInfo)
 			else:
 				for match in cls._getAutoPorts(usb=isUsb, bluetooth=isBluetooth):
 					yield match

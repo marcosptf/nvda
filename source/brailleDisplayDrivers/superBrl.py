@@ -40,7 +40,7 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver):
 
 	def __init__(self,port="Auto"):
 		super(BrailleDisplayDriver, self).__init__()
-		for portType, portId, port, portAlternateId in self._getTryPorts(port):
+		for portType, portId, port, portInfo in self._getTryPorts(port):
 			try:
 				self._dev = hwIo.Serial(port, baudrate=BAUD_RATE, stopbits=serial.STOPBITS_ONE, parity=serial.PARITY_NONE, timeout=TIMEOUT, writeTimeout=TIMEOUT, onReceive=self._onReceive)
 			except EnvironmentError:

@@ -28,17 +28,28 @@ POLL_INTERVAL = 5000
 
 _driverDevices = {}
 
-#: Key for USB HID devices
-KEY_USBHID = "usbHid"
-#: Key for USB Serial devices
-KEY_USBSER = "usbSerial"
-#: Key for USB devices with a manufacturer specific driver
-KEY_USBCUSTOM = "usbCustom"
+class DeviceMatch(
+	namedtuple("DeviceMatch", ("type","id", "port", "alternateId"))
+):
+	"""Represents a detected device.
+	@ivar id: The identifier of the device.
+	@type id: unicode
+	@ivar port: The port that can be used by a driver to communicate with a device.
+	@type port: unicode
+	@ivar deviceInfo: all known information about a device.
+	@type deviceInfo: dict
+	"""
+	__slots__ = ()
 
-#: Key for com ports of an unspecified type, either bluetooth, usb or legacy serial
-KEY_COMU = "comUnspecified"
-#: Key for Bluetooth com ports
-KEY_COMBT = "comBluetooth"
+# Device type constants
+#: Key constant for HID devices
+KEY_HID = "hid"
+#: Key for serial devices (com ports)
+KEY_SERIAL = "serial"
+#: Key for devices with a manufacturer specific driver
+KEY_CUSTOM = "custom"
+#: Key foor bluetooth devices
+KEY_BLUETOOTH = "bluetooth"
 
 def _getDriver(driver):
 	try:
@@ -51,7 +62,7 @@ def addUsbDevices(driver, type, ids):
 	"""Associate USB devices with a driver.
 	@param driver: The name of the driver.
 	@type driver: str
-	@param type: The type of the driver, one of c{KEY_USB*}
+	@param type: The type of the driver, one of c{deviceMatchTypes.keys()}
 	@type type: str
 	@param ids: A set of USB IDs in the form C{"VID_xxxx&PID_XXXX"}.
 	@type ids: set of str
@@ -60,39 +71,17 @@ def addUsbDevices(driver, type, ids):
 	driverUsb = devs[type]
 	driverUsb.update(ids)
 
-class DeviceMatch(
-	namedtuple("DeviceMatch", ("type", "id", "port", "alternateId"))
-):
-	"""Represents a detected device.
-	@ivar type: The type of the device, one of c{KEY_USB*} or c{KEY_COM*}
-	@type type: str
-	@ivar id: The identifier of the device.
-		For C{KEY_USB*}, this is the USB ID
-		For C{KEY_COMBT}, this is the Bluetooth name of the device.
-		For C{KEY_COMU}, this is the friendly name of the com port.
-	@type id: unicode
-	@ivar port: The port that can usually be used by a driver to communicate with a device.
-		For C{KEY_USBHID} and C{KEY_USBCUSTOM}, this is the device path.
-		For C{KEY_USBSER} and C{KEY_COM*}, this is the com port.
-	@type port: unicode
-	@ivar alternateId: An alternative identifier for the device.
-		For C{KEY_USB*} and C{KEY_COMU}, this is the hardware ID.
-		For C{KEY_COMBT}, this is the MAC address of the Bluetooth device.
-	@type alternateId: unicode
-	"""
-	__slots__ = ()
-
-def addBluetoothComPorts(driver, matchFunc):
-	"""Associate Bluetooth com ports with a driver.
+def addBluetoothDevices(driver, matchFunc):
+	"""Associate Bluetooth HID or com ports with a driver.
 	@param driver: The name of the driver.
 	@type driver: str
-	@param matchFunc: A function which determines whether a given Bluetooth com port matches.
-		It takes a L{BluetoothComPortMatch} as its only argument
+	@param matchFunc: A function which determines whether a given Bluetooth device matches.
+		It takes a L{DeviceMatch} as its only argument
 		and returns a C{bool} indicating whether it matched.
 	@type matchFunc: callable
 	"""
 	devs = _getDriver(driver)
-	devs[KEY_COMBT] = matchFunc
+	devs[KEY_BLUETOOTH] = matchFunc
 
 def getDriversForConnectedUsbDevices():
 	"""Get any matching drivers for connected USB devices.
@@ -100,11 +89,11 @@ def getDriversForConnectedUsbDevices():
 	@rtype: generator of (str, L{DeviceMatch}) tuples
 	"""
 	usbDevs = itertools.chain(
-		(DeviceMatch(KEY_USBCUSTOM, port["usbID"], port["devicePath"], port["hardwareID"])
+		(DeviceMatch(KEY_CUSTOM, port["usbID"], port["devicePath"], port)
 		for port in hwPortUtils.listUsbDevices()),
-		(DeviceMatch(KEY_USBHID, port["usbID"], port["devicePath"], port["hardwareID"])
+		(DeviceMatch(KEY_HID, port["usbID"], port["devicePath"], port)
 		for port in hwPortUtils.listHidDevices() if "usbID" in port),
-		(DeviceMatch(KEY_USBSER, port["usbID"], port["port"], port["hardwareID"])
+		(DeviceMatch(KEY_SERIAL, port["usbID"], port["port"], port)
 		for port in hwPortUtils.listComPorts() if "usbID" in port)
 	)
 	for match in usbDevs:
@@ -113,21 +102,21 @@ def getDriversForConnectedUsbDevices():
 				if match.type==type and match.id in ids:
 					yield driver, match
 
-def getDriversForPossibleBluetoothComPorts():
-	"""Get any matching drivers for possible Bluetooth com ports.
+def getDriversForPossibleBluetoothDevices():
+	"""Get any matching drivers for possible Bluetooth devices.
 	@return: Pairs of drivers and port information.
-	@rtype: generator of (str, L{BluetoothComPortMatch}) tuples
+	@rtype: generator of (str, L{DeviceMatch}) tuples
 	"""
-	btComs = [DeviceMatch(KEY_COMBT, port["bluetoothName"], port["port"], port["bluetoothAddress"])
+	btDevs = [DeviceMatch(KEY_SERIAL, port["bluetoothName"], port["port"], port)
 		for port in hwPortUtils.listComPorts()
 		if "bluetoothName" in port]
-	for driver, devs in _driverDevices.iteritems():
-		matchFunc = devs[KEY_COMBT]
-		if not callable(matchFunc):
-			continue
-		for port in btComs:
-			if matchFunc(port):
-				yield driver, port
+	for match in btDevs:
+		for driver, devs in _driverDevices.iteritems():
+			matchFunc = devs[KEY_BLUETOOTH]
+			if not callable(matchFunc):
+				continue
+			if matchFunc(match):
+				yield driver, match
 
 class Detector(object):
 	"""Automatically detect braille displays.
@@ -178,7 +167,7 @@ class Detector(object):
 
 		if bluetooth:
 			if self._btComs is None:
-				btComs = list(getDriversForPossibleBluetoothComPorts())
+				btComs = list(getDriversForPossibleBluetoothDevices())
 				# Cache Bluetooth com ports for next time.
 				btComsCache = []
 			else:
@@ -221,11 +210,11 @@ def getConnectedUsbDevicesForDriver(driver):
 	"""
 	devs = _driverDevices[driver]
 	usbDevs = itertools.chain(
-		(DeviceMatch(KEY_USBCUSTOM, port["usbID"], port["devicePath"], port["hardwareID"])
+		(DeviceMatch(KEY_CUSTOM, port["usbID"], port["devicePath"], port)
 		for port in hwPortUtils.listUsbDevices()),
-		(DeviceMatch(KEY_USBHID, port["usbID"], port["devicePath"], port["hardwareID"])
+		(DeviceMatch(KEY_HID, port["usbID"], port["devicePath"], port)
 		for port in hwPortUtils.listHidDevices() if "usbID" in port),
-		(DeviceMatch(KEY_USBSER, port["usbID"], port["port"], port["hardwareID"])
+		(DeviceMatch(KEY_SERIAL, port["usbID"], port["port"], port)
 		for port in hwPortUtils.listComPorts() if "usbID" in port)
 	)
 	for match in usbDevs:
@@ -233,21 +222,21 @@ def getConnectedUsbDevicesForDriver(driver):
 			if match.type==type and match.id in ids:
 				yield driver, match
 
-def getPossibleBluetoothComPortsForDriver(driver):
-	"""Get any possible Bluetooth com ports associated with a particular driver.
+def getPossibleBluetoothDevicesForDriver(driver):
+	"""Get any possible Bluetooth devices associated with a particular driver.
 	@param driver: The name of the driver.
 	@type driver: str
 	@return: Port information for each port.
-	@rtype: generator of L{BluetoothComPortMatch}
+	@rtype: generator of L{DeviceMatch}
 	@raise LookupError: If there is no detection data for this driver.
 	"""
-	matchFunc = _driverDevices[driver][KEY_COMBT]
+	matchFunc = _driverDevices[driver][KEY_BLUETOOTH]
 	if not callable(matchFunc):
 		return
-	for port in hwPortUtils.listComPorts():
-		if not "bluetoothName" in port:
-			continue
-		match = DeviceMatch(KEY_COMBT, port["bluetoothName"], port["port"], port["bluetoothAddress"])
+	btDevs = (DeviceMatch(KEY_SERIAL, port["bluetoothName"], port["port"], port)
+		for port in hwPortUtils.listComPorts()
+		if "bluetoothName" in port)
+	for match in btDevs:
 		if matchFunc(match):
 			yield match
 
@@ -261,12 +250,12 @@ def arePossibleDevicesForDriver(driver):
 	"""
 	return bool(next(itertools.chain(
 		getConnectedUsbDevicesForDriver(driver),
-		getPossibleBluetoothComPortsForDriver(driver)
+		getPossibleBluetoothDevicesForDriver(driver)
 	), None))
 
 ### Detection data
 # baum
-addUsbDevices("baum", KEY_USBHID, {
+addUsbDevices("baum", KEY_HID, {
 	"VID_0904&PID_3001", # RefreshaBraille 18
 	"VID_0904&PID_6101", # VarioUltra 20
 	"VID_0904&PID_6103", # VarioUltra 32
@@ -289,7 +278,7 @@ addUsbDevices("baum", KEY_USBHID, {
 	"VID_0483&PID_A1D3", # Orbit Reader 20
 })
 
-addUsbDevices("baum", KEY_USBSER, {
+addUsbDevices("baum", KEY_SERIAL, {
 	"VID_0403&PID_FE70", # Vario 40
 	"VID_0403&PID_FE71", # PocketVario
 	"VID_0403&PID_FE72", # SuperVario/Brailliant 40
@@ -309,7 +298,7 @@ addUsbDevices("baum", KEY_USBSER, {
 	"VID_0904&PID_3000", # RefreshaBraille 18
 })
 
-addBluetoothComPorts("baum", lambda m: any(m.id.startswith(prefix) for prefix in (
+addBluetoothDevices("baum", lambda m: any(m.id.startswith(prefix) for prefix in (
 	"Baum SuperVario",
 	"Baum PocketVario",
 	"Baum SVario",
@@ -323,28 +312,28 @@ addBluetoothComPorts("baum", lambda m: any(m.id.startswith(prefix) for prefix in
 )))
 
 # brailleNote
-addUsbDevices("brailleNote", KEY_USBSER, {
+addUsbDevices("brailleNote", KEY_SERIAL, {
 	"VID_1C71&PID_C004", # Apex
 })
-addBluetoothComPorts("brailleNote", lambda m:
-	any(first <= m.alternateId <= last for first, last in (
+addBluetoothDevices("brailleNote", lambda m:
+	any(first <= m.deviceInfo.get("bluetoothAddress",0) <= last for first, last in (
 		(0x0025EC000000, 0x0025EC01869F), # Apex
 	)) or m.id.startswith("Braillenote"))
 
 # brailliantB
-addUsbDevices("brailliantB", KEY_USBHID, {"VID_1C71&PID_C006"})
-addUsbDevices("brailliantB", KEY_USBCUSTOM, {"VID_1C71&PID_C005"})
-addBluetoothComPorts("brailliantB", lambda m:
+addUsbDevices("brailliantB", KEY_HID, {"VID_1C71&PID_C006"})
+addUsbDevices("brailliantB", KEY_CUSTOM, {"VID_1C71&PID_C005"})
+addBluetoothDevices("brailliantB", lambda m:
 	m.id.startswith("Brailliant B") or m.id == "Brailliant 80")
 
 # handyTech
-addUsbDevices("handyTech", KEY_USBSER, {
+addUsbDevices("handyTech", KEY_SERIAL, {
 	"VID_0403&PID_6001", # FTDI chip
 	"VID_0921&PID_1200", # GoHubs chip
 })
 
 # Newer Handy Tech displays have a native HID processor
-addUsbDevices("handyTech", KEY_USBHID, {
+addUsbDevices("handyTech", KEY_HID, {
 	"VID_1FE4&PID_0054", # Active Braille
 	"VID_1FE4&PID_0081", # Basic Braille 16
 	"VID_1FE4&PID_0082", # Basic Braille 20
@@ -359,13 +348,13 @@ addUsbDevices("handyTech", KEY_USBHID, {
 })
 
 # Some older HT displays use a HID converter and an internal serial interface
-addUsbDevices("handyTech", KEY_USBHID, {
+addUsbDevices("handyTech", KEY_HID, {
 	"VID_1FE4&PID_0003", # USB-HID adapter
 	"VID_1FE4&PID_0074", # Braille Star 40
 	"VID_1FE4&PID_0044", # Easy Braille
 })
 
-addBluetoothComPorts("handyTech", lambda m: any(m.id.startswith(prefix) for prefix in (
+addBluetoothDevices("handyTech", lambda m: any(m.id.startswith(prefix) for prefix in (
 	"Actilino AL",
 	"Active Braille AB",
 	"Active Star AS",
@@ -376,6 +365,6 @@ addBluetoothComPorts("handyTech", lambda m: any(m.id.startswith(prefix) for pref
 )))
 
 # superBrl
-addUsbDevices("superBrl", KEY_USBSER, {
+addUsbDevices("superBrl", KEY_SERIAL, {
 	"VID_10C4&PID_EA60", # SuperBraille 3.2
 })
