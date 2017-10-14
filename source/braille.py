@@ -1548,7 +1548,8 @@ class BrailleHandler(baseObject.AutoPropertyObject):
 				self._disableDetection()
 			log.info("Loaded braille display driver %s, current display has %d cells." %(name, self.displaySize))
 			self._curDisplayAutoDetected = bool(detected)
-			self.initialDisplay()
+			# Make sure we queue the initial display to the main thread
+			wx.CallAfter(self.initialDisplay)
 			return True
 		except:
 			# For auto display detection, logging an error for every failure is too obnoxious.

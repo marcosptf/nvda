@@ -476,7 +476,7 @@ class BrailleDisplayDriver(braille.BrailleDisplayDriver, ScriptableObject):
 		for portType, portId, port, portInfo in self._getTryPorts(port):
 			# At this point, a port bound to this display has been found.
 			# Try talking to the display.
-			self.isHid = portType == bdDetect.KEY_USBHID
+			self.isHid = portType == bdDetect.KEY_HID
 			self.isHidSerial = portId in USB_IDS_HID_CONVERTER
 			try:
 				if self.isHid:

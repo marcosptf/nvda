@@ -29,7 +29,7 @@ POLL_INTERVAL = 5000
 _driverDevices = {}
 
 class DeviceMatch(
-	namedtuple("DeviceMatch", ("type","id", "port", "alternateId"))
+	namedtuple("DeviceMatch", ("type","id", "port", "deviceInfo"))
 ):
 	"""Represents a detected device.
 	@ivar id: The identifier of the device.
@@ -140,7 +140,7 @@ class Detector(object):
 		if callAfter:
 			winKernel.setWaitableTimer(
 				self._pollTimer,
-				POLL_INTERVAL,
+				callAfter,
 				0,
 				self._BgScanApc
 			)
